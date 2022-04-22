@@ -60,7 +60,7 @@ def test_equivalent_feature_perturbations():
     # # indirect attack/ influencer attack
     # model.attack(features, adj, labels, target_node, n_perturbations, direct=False, n_influencers=5)
     modified_adj = model.modified_adj
-    modified_features, _ = equivalent_feature_perturbation(target_node, adj, modified_adj, features)
+    modified_features, _ = equivalent_feature_perturbation(adj, modified_adj, features, target_node)
     print(model.structure_perturbations)
 
     print('=== testing GCN on original(clean) graph ===')

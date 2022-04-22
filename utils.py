@@ -1,9 +1,10 @@
 from deeprobust.graph import utils
 import time
 import numpy as np
+import scipy.sparse as sp
 
 
-def equivalent_feature_perturbation(target_node, adj, adj_m, features):
+def equivalent_feature_perturbation(adj, adj_m, features, target_node=None):
     start = time.time()
     modified_features = features.tolil().copy()
 
@@ -12,14 +13,20 @@ def equivalent_feature_perturbation(target_node, adj, adj_m, features):
     adj_m_norm = utils.normalize_adj(adj_m.tocsr())
     adj_m_norm = adj_m_norm.dot(adj_m_norm)
 
-    adj_norm_ii_inv = np.power(adj_norm[target_node, target_node], -1)
+    D_ii = sp.diags(adj_norm.diagonal()).power(-1)  # element-wise power, not inverse!
 
     adj_diff = adj_m_norm - adj_norm
 
-    delta = adj_diff.dot(features) * adj_norm_ii_inv
-    modified_features[target_node] += delta[target_node]
+    delta = D_ii.dot(adj_diff.dot(features))
     end = time.time()
     print("Converted structure perturbations to feature perturbations in %f ms" % (end - start))
-    return modified_features.tocsr(), delta[target_node]
 
+    if target_node is not None:
+        # update only for target node
+        modified_features[target_node] += delta[target_node]
+        return modified_features.tocsr(), delta[target_node]
+    else:
+        # update for all nodes
+        modified_features += delta
+        return modified_features.tocsr(), delta
 

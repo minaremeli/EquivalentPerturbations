@@ -100,7 +100,7 @@ def multi_test_attack(surrogate, target_gcn, attack_model, data, poisoning, n_pe
                                              target_node=target_node)
         s_p_margins.append(margin_s)
 
-        modified_features, delta = equivalent_feature_perturbation(target_node, adj, modified_adj, features)
+        modified_features, delta = equivalent_feature_perturbation(adj, modified_adj, features, target_node)
         deltas[target_node] = delta
         acc = single_test(adj, modified_features, labels, target_node,
                           gcn=target_gcn, poisoning=poisoning,
