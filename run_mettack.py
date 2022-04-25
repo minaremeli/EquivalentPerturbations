@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from deeprobust.graph.defense import GCN
 from deeprobust.graph.data import Dataset, PtbDataset
+from deeprobust.graph.global_attack import Metattack
 from os import path
 import os
 from utils import equivalent_feature_perturbation
@@ -10,10 +11,14 @@ from utils import equivalent_feature_perturbation
 parser = argparse.ArgumentParser()
 parser.add_argument('--seeds', nargs='+', type=int, help='Random seeds.')
 parser.add_argument('--dataset', type=str, default='cora',
-                    choices=['cora', 'citeseer', 'polblogs'], help='dataset')
+                    choices=['cora', 'citeseer', 'polblogs', 'pubmed'], help='dataset')
 parser.add_argument('--n_hidden', type=int, default=16, help='Dimension of node embeddings.')
 parser.add_argument('--n_iters', type=int, default=200, help='Number of training iterations.')
+parser.add_argument('--ptb_rate', type=float, default=0.05,  help='pertubation rate')
 parser.add_argument('--results_dir', type=str, default='.', help='Path of directory where results should be saved.')
+
+# datasets for which have ready-made attacked graphs
+pre_attacked_datasets = ['cora', 'citeseer', 'polblogs']
 
 args = parser.parse_args()
 args.cuda = torch.cuda.is_available()
@@ -46,6 +51,7 @@ def main():
         data = Dataset(root='/tmp/', name=args.dataset, setting='prognn')
         adj, features, labels = data.adj, data.features, data.labels
         idx_train, idx_val, idx_test = data.idx_train, data.idx_val, data.idx_test
+        idx_unlabeled = np.union1d(idx_val, idx_test)
 
         target_gcn = GCN(nfeat=features.shape[1],
                          nhid=args.n_hidden,
@@ -54,6 +60,7 @@ def main():
                          with_relu=True,
                          with_bias=False,
                          device=device)
+        target_gcn = target_gcn.to(device)
 
         target_gcn.initialize()
         target_gcn.fit(features, adj, labels, idx_train, idx_val, train_iters=args.n_iters, patience=30, verbose=True)
@@ -63,12 +70,34 @@ def main():
         test_acc = target_gcn.test(idx_test)
         clean_accs.append(test_acc)
 
-        print('==================')
-        print('=== load graph perturbed by DeepRobust 5% metattack (under prognn splits) ===')
-        perturbed_data = PtbDataset(root='/tmp/',
-                                    name=args.dataset,
-                                    attack_method='meta')
-        perturbed_adj = perturbed_data.adj
+
+        if args.dataset in pre_attacked_datasets and args.ptb_rate == 0.05:
+            print('==================')
+            print('=== load graph perturbed by DeepRobust 5% metattack (under prognn splits) ===')
+            perturbed_data = PtbDataset(root='/tmp/',
+                                        name=args.dataset,
+                                        attack_method='meta')
+            perturbed_adj = perturbed_data.adj
+        else:
+            print('==================')
+            print('=== create perturbed graph with %d%% metattack ===' % (int(args.ptb_rate * 100)))
+            surrogate = GCN(nfeat=features.shape[1],
+                            nhid=args.n_hidden,
+                            nclass=labels.max().item() + 1,
+                            dropout=0,
+                            lr=0.01,
+                            weight_decay=0,
+                            with_relu=False,
+                            with_bias=False,
+                            device=device)
+            surrogate = surrogate.to(device)
+            surrogate.fit(features, adj, labels, idx_train)
+
+            perturbations = int(args.ptb_rate * (adj.sum() // 2))
+            attack_model = Metattack(model=surrogate, nnodes=adj.shape[0], feature_shape=features.shape,  attack_structure=True, attack_features=False, device=device, lambda_=0)
+            attack_model = attack_model.to(device)
+            attack_model.attack(features, adj, labels, idx_train, idx_unlabeled, perturbations, ll_constraint=False)
+            perturbed_adj = attack_model.modified_adj
 
         target_gcn.initialize()
         target_gcn.fit(features, perturbed_adj, labels, idx_train, idx_val, train_iters=args.n_iters, patience=30, verbose=True)
